@@ -37,6 +37,8 @@ export interface MailDeps {
   // the inbound mail's OpenMail thread.
   redraft?: (draft: MailDraft, note: string) => Promise<void>
   threadFor?: (inboundId: string) => Promise<string | undefined>
+  // A reply draft was delivered (or marked sent): the inbound mail it answers is done.
+  replied?: (inboundId: string, draftId: string) => Promise<void>
   audit?: (kind: string, ref: string, detail: Record<string, unknown>) => Promise<void>
 }
 
@@ -129,11 +131,13 @@ export const createMailService = (deps: MailDeps) => {
   }
   const action = async (id: string, type: 'undo' | 'discard' | 'restore' | 'stopRevise' | 'markSent'): Promise<MailDraft> => {
     const row = await requireDraft(id)
-    return changed(await apply(row, type === 'undo' ? { type, previousState: row.queuedSnapshot?.previousState } : { type }, {
+    const draft = changed(await apply(row, type === 'undo' ? { type, previousState: row.queuedSnapshot?.previousState } : { type }, {
       ...(type === 'undo' ? { error: row.queuedSnapshot?.previousError ?? null } : {}),
       revision: row.revision + 1, revisionNote: null,
       ...(type === 'markSent' ? { sentAt: now(), outcome: 'sent' as const, error: null } : {}),
     }))
+    if (type === 'markSent' && row.inboundId) await deps.replied?.(row.inboundId, row.id)
+    return draft
   }
   const revise = async (id: string, note: string): Promise<MailDraft> => {
     const row = await requireDraft(id)
@@ -173,6 +177,7 @@ export const createMailService = (deps: MailDeps) => {
           changed(await apply(claimed, { type: 'delivered', outcome: result.outcome, messageId: result.messageId }, {
             outcome: result.outcome, messageId: result.messageId ?? null, sentAt: now(), error: null,
           }))
+          if (claimed.inboundId) await deps.replied?.(claimed.inboundId, claimed.id)
         }
         catch (error) {
           // A thrown transport may already have delivered. Never automatically retry it.
@@ -224,9 +229,11 @@ export const createMailService = (deps: MailDeps) => {
       subject: input.subject, body: input.body, receivedAt: input.receivedAt, agentNote: null, readAt: null, createdAt: now() })
     await notifyReplies()
   }
+  // Drafts waiting for the owner: to review, failed, or with an unknown delivery.
+  const isReviewable = (row: DraftRow): boolean => ['draft', 'edited', 'failed', 'unknown'].includes(row.state)
   const summary = async (): Promise<MailSummary> => {
     const all = await repo.listDrafts()
-    const waiting = all.filter(row => ['draft', 'edited', 'failed', 'unknown'].includes(row.state))
+    const waiting = all.filter(isReviewable)
     const unread = await repo.listReplies({ unread: '1' })
     const byId = new Map(all.map(row => [row.id, row]))
     const draftOf = (row: ReplyRow): DraftRow | undefined => byId.get(row.draftId)
@@ -303,6 +310,7 @@ export const createMailService = (deps: MailDeps) => {
     changed(await apply(row, { type: 'stopRevise' }, { error, revision: row.revision + 1, revisionNote: null }))
   }
   return {
+    reviewCount: async (): Promise<number> => (await repo.listDrafts()).filter(isReviewable).length,
     noteReply, listAgentDrafts, listAgentReplies, replyRevision, stopRevise,
     createDraft, edit, agentRevision, queue, action, revise, tick, recover, ingest, notifyReplies, summary,
     listDrafts: async (filter: MailFilter, sent = false): Promise<MailDraft[]> =>

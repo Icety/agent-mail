@@ -187,7 +187,10 @@ Owner (`requireOwner`): `GET /api/mail/drafts|sent|replies|summary|senders|addre
 `PATCH /api/mail/addresses/:id`, `GET /api/mail/inbound/:id`, `POST /api/mail/inbound/:id/draft|done`.
 
 Agents (`requireAgent`): `GET|POST /api/internal/mail/drafts`, `POST /api/internal/mail/drafts/:id/revision`,
-`GET /api/internal/mail/replies`, `POST /api/internal/mail/replies/:id/note`.
+`GET /api/internal/mail/replies`, `POST /api/internal/mail/replies/:id/note`,
+`GET /api/internal/mail/inbound?conversation=|agent=&view=&from=` and `POST /api/internal/mail/inbound/:id/done`.
+Every agent call names its conversation or agent, and runs the host's `authorize` with the action
+(`createDraft`, `reviseDraft`, `readDrafts`, `readReplies`, `noteReply`, `readInbox`, `doneInbound`).
 
 Request schemas and answers: `shared/types.ts`.
 
@@ -200,6 +203,10 @@ Request schemas and answers: `shared/types.ts`.
   no longer change. The snapshot is what goes out, never the live row.
 - A send that throws may have delivered: the draft becomes "Delivery unknown" and is never retried
   on its own. The owner checks, then discards, marks as sent or sends again.
+- Inbound mail views: `inbox` (waiting for the owner), `noise` (Low priority: DMARC reports, decided
+  without the model, and what the reader calls noise), `done`, `all`. A mail is done when the owner
+  closes it, when the owner's reply to it is sent, or when an agent closes it; each is one
+  `inbound_done` audit line saying who.
 - Replies (IMAP or OpenMail) match the sent Message-ID, are stored once, and become one system note
   to the agent (marked untrusted) and one push.
 

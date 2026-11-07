@@ -1,19 +1,31 @@
 import { Database } from 'bun:sqlite'
 import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
+import { eq } from 'drizzle-orm'
+import { drizzle as pgDrizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
+import { drizzle as sqliteDrizzle } from 'drizzle-orm/bun-sqlite'
 import type { MailHostPorts, MailStore } from './ports'
 import { createSqliteMailStore } from './storage/sqlite/store'
 import { createPgMailStore, pgMigrationsDir } from './storage/pg/store'
+import { audit as sqliteAudit } from './storage/sqlite/schema'
+import { audit as pgAudit } from './storage/pg/schema'
+
+export interface AuditLine { ref: string | null, detail: Record<string, unknown> }
+export interface OpenedStore { store: MailStore, auditLines: (kind: string) => Promise<AuditLine[]> }
 
 // Test support only (not exported). Every service test runs once per storage adapter, so both
 // stores are held to the same contract.
-export const storeAdapters: { name: string, open: () => Promise<MailStore> }[] = [
-  { name: 'sqlite', open: async () => createSqliteMailStore(new Database(':memory:')) },
+export const storeAdapters: { name: string, open: () => Promise<OpenedStore> }[] = [
+  { name: 'sqlite', open: async () => {
+    const sqlite = new Database(':memory:')
+    const store = createSqliteMailStore(sqlite)
+    const db = sqliteDrizzle(sqlite)
+    return { store, auditLines: async kind => db.select({ ref: sqliteAudit.ref, detail: sqliteAudit.detail }).from(sqliteAudit).where(eq(sqliteAudit.kind, kind)).orderBy(sqliteAudit.id).all() }
+  } },
   { name: 'postgres', open: async () => {
-    const db = drizzle(new PGlite())
+    const db = pgDrizzle(new PGlite())
     await migrate(db, { migrationsFolder: pgMigrationsDir, migrationsTable: '__drizzle_migrations_mail' })
-    return createPgMailStore(db)
+    return { store: createPgMailStore(db), auditLines: async kind => db.select({ ref: pgAudit.ref, detail: pgAudit.detail }).from(pgAudit).where(eq(pgAudit.kind, kind)).orderBy(pgAudit.id) }
   } },
 ]
 

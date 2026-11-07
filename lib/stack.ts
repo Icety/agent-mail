@@ -36,6 +36,7 @@ export const createMailStack = (deps: MailStackDeps) => {
     push: host.push ?? (async () => {}),
     redraft: (draft, note) => late.inbound ? late.inbound.redraft(draft, note) : Promise.resolve(),
     threadFor: async inboundId => (await inboundRepo.getInbound(inboundId))?.threadId,
+    replied: async (inboundId, draftId) => { await late.inbound?.replied(inboundId, draftId) },
     audit: (kind, ref, detail) => inboundRepo.audit(kind, ref, detail, now()),
   })
 
@@ -58,6 +59,8 @@ export const createMailStack = (deps: MailStackDeps) => {
     reviseReplyDraft: (draftId, baseRevision, reply) => mail.replyRevision(draftId, baseRevision, reply),
     stopRevise: (draftId, error) => mail.stopRevise(draftId, error),
     publish,
+    conversation: host.conversation,
+    authorize: async ctx => { await host.authorize?.(ctx) },
   }) : undefined
   late.inbound = inbound
 

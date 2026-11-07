@@ -12,12 +12,14 @@ const props = withDefaults(defineProps<{
   agentId?: string | null
   /** Open this thread (sent draft id) right away. */
   thread?: string | null
+  /** Open this draft, with its actions, right away (a sent one opens as its thread). */
+  draft?: string | null
   /** Header line of the batch review. */
   reviewSubtitle?: string
   onOpen?: (target: MailOpenTarget) => void
   /** Draft id the host has open, marked in the lists. */
   selected?: string | null
-}>(), { conversationId: null, agentId: null, thread: null, reviewSubtitle: undefined, onOpen: undefined, selected: null })
+}>(), { conversationId: null, agentId: null, thread: null, draft: null, reviewSubtitle: undefined, onOpen: undefined, selected: null })
 
 type Tab = 'drafts' | 'sent' | 'replies'
 type View = { kind: 'list' } | { kind: 'draft', id: string } | { kind: 'thread', id: string }
@@ -27,11 +29,16 @@ const mail = useMail(scope)
 const review = useMailReview()
 
 const tab = ref<Tab>('drafts')
-const view = ref<View>(props.thread ? { kind: 'thread', id: props.thread } : { kind: 'list' })
+const view = ref<View>(props.thread ? { kind: 'thread', id: props.thread } : props.draft ? { kind: 'draft', id: props.draft } : { kind: 'list' })
 watch(() => props.thread, (id) => { if (id) view.value = { kind: 'thread', id } })
+watch(() => props.draft, (id) => { if (id) view.value = { kind: 'draft', id } })
+// A draft opened by id (just written from an inbound mail, or a link) may not be cached yet.
+const actions = useMailActions()
+watch(view, (v) => { if (v.kind === 'draft' && !mailCachedDraft(v.id)) void actions.latest(v.id) }, { immediate: true })
+const shown = computed<View>(() => view.value.kind === 'draft' && mailCachedDraft(view.value.id)?.state === 'sent' ? { kind: 'thread', id: view.value.id } : view.value)
 // Pages hide their own back button while a draft or thread is open, so there is one back control.
 const emit = defineEmits<{ view: [kind: View['kind']] }>()
-watch(() => view.value.kind, kind => emit('view', kind), { immediate: true })
+watch(() => shown.value.kind, kind => emit('view', kind), { immediate: true })
 
 const repliesByDraft = computed(() => {
   const map = new Map<string, number>()
@@ -65,17 +72,21 @@ defineExpose({ openThread, openReview })
 <template>
   <div class="flex h-full min-h-0 flex-1 flex-col px-4 sm:px-5">
     <!-- A draft or a thread, opened from the lists -->
-    <div v-if="view.kind !== 'list'" class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-3">
-      <template v-if="view.kind === 'draft'">
+    <div v-if="shown.kind !== 'list'" class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-3">
+      <template v-if="shown.kind === 'draft'">
         <UButton label="All drafts" icon="i-lucide-chevron-left" color="neutral" variant="ghost" class="mb-2 min-h-10 self-start max-sm:min-h-11" @click="back" />
         <MailDraftCard
-          v-if="mailCachedDraft(view.id)"
-          :draft="mailCachedDraft(view.id)!"
-          :reply-count="repliesByDraft.get(view.id) ?? 0"
+          v-if="mailCachedDraft(shown.id)"
+          :draft="mailCachedDraft(shown.id)!"
+          :reply-count="repliesByDraft.get(shown.id) ?? 0"
           :on-thread="openThread"
         />
+        <div v-else class="flex flex-col gap-2 rounded-mail-card bg-mail-card p-4 shadow-mail-ring">
+          <USkeleton class="h-4 w-1/2 rounded-full" />
+          <USkeleton class="h-3 w-1/3 rounded-full" />
+        </div>
       </template>
-      <MailThread v-else :draft-id="view.id" :on-back="back" />
+      <MailThread v-else :draft-id="shown.id" :on-back="back" />
     </div>
 
     <template v-else>

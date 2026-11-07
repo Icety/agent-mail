@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Every draft, sent mail and reply, or those of one agent or chat (?agent=, ?conversation=).
-// ?thread=<draft id> opens that thread; draft cards in chats link here.
+// ?thread=<draft id> opens that sent thread; ?draft=<draft id> opens that draft with its actions
+// (edit, revise, send), which is where a reply written from an inbound mail lands.
 definePageMeta({ hideTabBar: true })
 const host = useMailClientHost()
 useHead({ title: `Mail · ${host.appName}` })
@@ -10,6 +11,7 @@ const one = (v: unknown): string | null => typeof v === 'string' && v ? v : null
 const agentId = computed(() => one(route.query.agent))
 const conversationId = computed(() => one(route.query.conversation))
 const thread = computed(() => one(route.query.thread))
+const draft = computed(() => one(route.query.draft))
 
 const subtitle = computed(() => {
   if (conversationId.value) return host.conversationTitle?.(conversationId.value) ?? 'One chat'
@@ -17,7 +19,7 @@ const subtitle = computed(() => {
   return 'Drafts, sent mail and replies from every agent'
 })
 // While a draft or thread is open the panel shows its own back button: the page header steps aside.
-const listing = ref(!thread.value)
+const listing = ref(!thread.value && !draft.value)
 </script>
 
 <template>
@@ -32,6 +34,7 @@ const listing = ref(!thread.value)
       :agent-id="agentId"
       :conversation-id="conversationId"
       :thread="thread"
+      :draft="draft"
       @view="kind => { listing = kind === 'list' }"
     />
   </div>

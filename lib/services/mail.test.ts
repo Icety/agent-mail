@@ -7,7 +7,7 @@ import { createFakeHost, storeAdapters } from '../test-support'
 for (const adapter of storeAdapters) describe(adapter.name, () => {
   const setup = async (transport: MailTransport = createLogTransport()) => {
     let time = Date.parse('2026-10-15T12:30:00Z')
-    const repo = (await adapter.open()).mail
+    const repo = (await adapter.open()).store.mail
     const fake = createFakeHost([{ id: 'agent-1', name: 'Any agent' }], { 'conv-1': 'agent-1' })
     let pushes = 0
     const deps: MailDeps = {
@@ -187,6 +187,7 @@ for (const adapter of storeAdapters) describe(adapter.name, () => {
       fromName: 'Anna', fromAddress: 'anna@example.test', subject: 'Reply subject', body: 'Reply',
       receivedAt: f.deps.now(), createdAt: f.deps.now(), agentNote: null, readAt: null })
     const summary = await f.service.summary()
+    expect(await f.service.reviewCount()).toBe(3)
     expect(summary.needs[0]).toMatchObject({ title: 'Anna replied', detail: 'Reply subject' })
     expect(summary.needs.slice(1)).toHaveLength(2)
     expect(summary.needs.find(item => item.action.to === '/c/conv-1' && item.tone === 'mail')).toMatchObject({

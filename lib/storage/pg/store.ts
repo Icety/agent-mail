@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm'
+import type { InboundView } from '../../../shared/types'
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core'
 import { fileURLToPath } from 'node:url'
 import type { InboundRepo, MailRepo, MailStore } from '../../ports'
@@ -99,8 +100,19 @@ const createInboundRepo = (db: PgMailDb): InboundRepo => ({
   getInbound: async id => first(await db.select().from(inbound).where(eq(inbound.id, id))),
   updateInbound: async (id, values) => first(await db.update(inbound).set(values).where(eq(inbound.id, id)).returning()),
   unhandled: async () => db.select().from(inbound).where(eq(inbound.status, 'received')).orderBy(asc(inbound.receivedAt)),
-  listInbound: async ({ done }) => db.select().from(inbound)
-    .where(done ? undefined : ne(inbound.status, 'done')).orderBy(desc(inbound.receivedAt)).limit(200),
+  listInbound: async ({ view, from }) => {
+    const pattern = from ? `%${from.replace(/[\\%_]/g, '\\$&')}%` : undefined
+    const views: Record<InboundView, SQL | undefined> = {
+      inbox: and(ne(inbound.status, 'done'), or(isNull(inbound.category), ne(inbound.category, 'noise'))),
+      noise: and(ne(inbound.status, 'done'), eq(inbound.category, 'noise')),
+      done: eq(inbound.status, 'done'),
+      all: undefined,
+    }
+    return db.select().from(inbound).where(and(
+      views[view],
+      pattern ? or(sql`${inbound.fromAddress} ILIKE ${pattern} ESCAPE '\\'`, sql`${inbound.fromName} ILIKE ${pattern} ESCAPE '\\'`) : undefined,
+    )).orderBy(desc(inbound.receivedAt)).limit(200)
+  },
   undigestedNoise: async () => db.select().from(inbound)
     .where(and(eq(inbound.category, 'noise'), eq(inbound.status, 'handled'), isNull(inbound.digestedAt))).orderBy(asc(inbound.receivedAt)),
   draftsFor: async inboundId => db.select({ id: drafts.id, state: drafts.state }).from(drafts)

@@ -140,7 +140,7 @@ export interface MailTransport {
 
 export interface MailAuthorization {
   agentId: string
-  action: 'createDraft' | 'reviseDraft' | 'readDrafts' | 'readReplies' | 'noteReply'
+  action: 'createDraft' | 'reviseDraft' | 'readDrafts' | 'readReplies' | 'noteReply' | 'readInbox' | 'doneInbound'
   allowed: boolean
 }
 
@@ -252,7 +252,26 @@ export interface IncomingMail {
   drafts: { id: string, state: MailState }[]
 }
 
-export const inboundQuerySchema = z.object({ done: z.enum(['1', 'true']).optional() })
+// Inbox views. inbox: waiting for the owner (not done, not noise). noise: low priority, filtered out
+// of the inbox (newsletters, DMARC reports, bounces), still listed and in the daily digest.
+export const INBOUND_VIEWS = ['inbox', 'noise', 'done', 'all'] as const
+export type InboundView = typeof INBOUND_VIEWS[number]
+export const inboundQuerySchema = z.object({ view: z.enum(INBOUND_VIEWS).default('inbox') })
+
+// Agent routes under /api/internal/mail/inbound. Who asks: the agent, or the chat it works in
+// (one of the two, like draftsQuerySchema). `view` as above (default inbox); `done=1` is the
+// older spelling of `view=all`. `from` is a substring of the sender's address or name.
+export const agentInboundQuerySchema = z.object({
+  conversation: z.string().min(1).optional(),
+  agent: z.string().min(1).optional(),
+  view: z.enum(INBOUND_VIEWS).optional(),
+  done: z.enum(['0', '1', 'true', 'false']).optional(),
+  from: z.string().trim().max(200).optional(),
+})
+export const agentInboundDoneSchema = z.object({
+  conversation: z.string().min(1).optional(),
+  agent: z.string().min(1).optional(),
+}).default({})
 
 // POST /api/mail/inbound/:id/draft: the owner's instruction for the reply.
 export const draftReplySchema = z.object({ instruction: z.string().trim().max(2_000).default('') })
@@ -284,7 +303,7 @@ export interface MailTopicMap {
 
 // GET /api/mail/summary: what needs the owner, what was sent lately, and badge counts. Shaped so
 // a host can merge it into its own home screen.
-export type MailTone = 'mail' | 'reply'
+export type MailTone = 'mail' | 'reply' | 'neutral'
 export interface MailNeed {
   id: string
   tone: MailTone
@@ -302,8 +321,19 @@ export interface MailChange {
   source: string
   to?: string
 }
+// One slip into the inbox on the home screen, always there when OpenMail is on.
+export interface MailSlip {
+  tone: MailTone
+  icon: string
+  label: string
+  title: string
+  meta?: string
+  badges?: { label: string, tone: MailTone }[]
+  to: string
+}
 export interface MailSummary {
   needs: MailNeed[]
+  slip?: MailSlip
   changed: MailChange[]
   // nav 'mail': everything waiting; nav 'projects': only agents a host's agentScope marked.
   badges: { nav: string, count: number, tone: MailTone }[]

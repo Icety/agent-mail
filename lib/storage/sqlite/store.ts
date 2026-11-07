@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import { and, asc, desc, eq, inArray, isNull, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm'
+import type { InboundView } from '../../../shared/types'
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { fileURLToPath } from 'node:url'
@@ -97,8 +98,20 @@ const createInboundRepo = (db: SqliteMailDb): InboundRepo => ({
   getInbound: async id => db.select().from(inbound).where(eq(inbound.id, id)).get(),
   updateInbound: async (id, values) => db.update(inbound).set(values).where(eq(inbound.id, id)).returning().get(),
   unhandled: async () => db.select().from(inbound).where(eq(inbound.status, 'received')).orderBy(asc(inbound.receivedAt)).all(),
-  listInbound: async ({ done }) => db.select().from(inbound)
-    .where(done ? undefined : ne(inbound.status, 'done')).orderBy(desc(inbound.receivedAt)).limit(200).all(),
+  listInbound: async ({ view, from }) => {
+    const pattern = from ? `%${from.replace(/[\\%_]/g, '\\$&')}%` : undefined
+    const views: Record<InboundView, SQL | undefined> = {
+      inbox: and(ne(inbound.status, 'done'), or(isNull(inbound.category), ne(inbound.category, 'noise'))),
+      noise: and(ne(inbound.status, 'done'), eq(inbound.category, 'noise')),
+      done: eq(inbound.status, 'done'),
+      all: undefined,
+    }
+    // SQLite LIKE ignores ASCII case.
+    return db.select().from(inbound).where(and(
+      views[view],
+      pattern ? or(sql`${inbound.fromAddress} LIKE ${pattern} ESCAPE '\\'`, sql`${inbound.fromName} LIKE ${pattern} ESCAPE '\\'`) : undefined,
+    )).orderBy(desc(inbound.receivedAt)).limit(200).all()
+  },
   undigestedNoise: async () => db.select().from(inbound)
     .where(and(eq(inbound.category, 'noise'), eq(inbound.status, 'handled'), isNull(inbound.digestedAt))).orderBy(asc(inbound.receivedAt)).all(),
   draftsFor: async inboundId => db.select({ id: drafts.id, state: drafts.state }).from(drafts)

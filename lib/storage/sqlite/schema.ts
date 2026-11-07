@@ -87,7 +87,8 @@ export const addresses = sqliteTable('mail_addresses', {
 })
 
 // Every inbound OpenMail message, sanitized. status: received (stored, not handled yet),
-// handled (classified, owner notified unless noise), done (the owner finished it).
+// handled (classified, owner notified unless noise), done (the owner finished it, their reply was
+// sent, or an agent closed it). Noise stays handled, out of the inbox, until the digest or done.
 export const inbound = sqliteTable('mail_inbound', {
   id: text('id').primaryKey(),
   openmailMessageId: text('openmail_message_id').notNull().unique(),

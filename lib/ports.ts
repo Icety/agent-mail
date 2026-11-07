@@ -1,5 +1,5 @@
 import type { AddressRow, DraftRow, InboundRow, ReplyRow, SenderRow } from './rows'
-import type { MailAgentScope, MailAuthorization, MailState, MailTopicMap, MailTransport } from '../shared/types'
+import type { InboundView, MailAgentScope, MailAuthorization, MailState, MailTopicMap, MailTransport } from '../shared/types'
 
 export interface MailFilter { conversation?: string, agent?: string }
 export type ReplyFilter = MailFilter & { unread?: string }
@@ -49,7 +49,8 @@ export interface InboundRepo {
   getInbound: (id: string) => Promise<InboundRow | undefined>
   updateInbound: (id: string, values: Partial<InboundRow>) => Promise<InboundRow | undefined>
   unhandled: () => Promise<InboundRow[]>
-  listInbound: (opts: { done: boolean }) => Promise<InboundRow[]>
+  // Newest first, 200 at most. `from`: a substring of the sender's address or name, any case.
+  listInbound: (opts: { view: InboundView, from?: string }) => Promise<InboundRow[]>
   undigestedNoise: () => Promise<InboundRow[]>
   draftsFor: (inboundId: string) => Promise<{ id: string, state: MailState }[]>
 

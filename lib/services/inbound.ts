@@ -1,14 +1,16 @@
 import type { InboundRepo, MailLinks, MailOwner } from '../ports'
 import type { InboundRow, AddressRow } from '../rows'
 import { addressWire, inboundWire } from '../wire'
-import type { AddressKind, IncomingMail, MailAddress, MailDraft, MailTopicMap } from '../../shared/types'
+import type { AddressKind, IncomingMail, InboundView, MailAddress, MailAuthorization, MailDraft, MailNeed, MailSlip, MailTopicMap } from '../../shared/types'
 import type { OpenMailClient, OpenMailMessage } from './openmail'
 import type { MailForModel, MailReader } from './reader'
 import { sanitizeLine, sanitizeMail } from './sanitize'
 
 // Inbound mail from OpenMail: store once, classify with the tool-less reader, tell the owner in the
-// chat of the agent that owns the address. Noise waits for the daily digest. Nothing here sends
-// mail or hands mail content to an agent session; replies are drafts the owner sends.
+// chat of the agent that owns the address. Noise (DMARC reports, newsletters, bounces) stays out
+// of the inbox, under Low priority, and waits for the daily digest. A mail is done when the owner
+// closes it, when their reply to it is sent, or when an agent closes it. Nothing here sends mail or
+// hands mail content to an agent session; replies are drafts the owner sends.
 
 export class InboundError extends Error {
   constructor(public readonly statusCode: number, message: string) { super(message) }
@@ -35,6 +37,15 @@ export interface InboundDeps {
   reviseReplyDraft: (draftId: string, baseRevision: number, reply: { subject: string, body: string }) => Promise<unknown>
   stopRevise: (draftId: string, error: string) => Promise<void>
   publish: <K extends keyof MailTopicMap>(topic: K, data: MailTopicMap[K]) => void
+  // For the agent routes: whose chat a call comes from, and the host's authorize hook.
+  conversation: (id: string) => Promise<{ agentId: string } | undefined>
+  authorize: (ctx: MailAuthorization) => Promise<void>
+}
+
+// Who an internal call acts as: the agent named, or the owner of the chat it works in.
+export interface AgentScope {
+  agent?: string
+  conversation?: string
 }
 
 const FORWARD_MARKER = /^[ \t>]*(?:-{2,}\s*(?:Forwarded message|Doorgestuurd bericht|Original Message|Oorspronkelijk bericht)\s*-{2,}|Begin forwarded message:|Begin doorgestuurd bericht:)[ \t]*$/im
@@ -48,6 +59,11 @@ const escapeMd = (value: string): string => value.replace(/[\\`*_{}[\]()<>#+\-.!
 const md = (value: string): string => escapeMd(value).replace(/\s+/g, ' ').trim()
 // Same, for model text with paragraphs: keeps line breaks as hard breaks.
 const mdLines = (value: string): string => value.trim().split(/\n/).map(line => escapeMd(line.trim())).join('  \n')
+
+// DMARC aggregate reports, wherever they land: "Report domain: x Submitter: google.com ..." from a
+// dmarc mailbox. Decided here, not by the model.
+const isDmarcReport = (row: Pick<InboundRow, 'subject' | 'fromAddress'>): boolean =>
+  /^(\[preview\] )?report domain:/i.test(row.subject) || /dmarc/i.test(row.fromAddress.split('@')[0] ?? '')
 
 const guessKind = (address: string, ownerAddress: string): AddressKind => {
   const local = address.split('@')[0] ?? ''
@@ -146,13 +162,15 @@ export const createInboundService = (deps: InboundDeps) => {
     let done: InboundRow | undefined
     if (kind === 'intake') done = await handleIntake(row)
     if (!done) {
-      const result = kind === 'reports'
+      const result = kind === 'reports' || isDmarcReport(row)
         ? { category: 'noise' as const, summary: 'DMARC report', suggestedAction: 'Nothing to do' }
         : await deps.reader.classify(forModel(row), kind).catch(async error => {
           await audit('classify_failed', row.id, { error: error instanceof Error ? error.message.slice(0, 300) : 'unknown' })
           return { category: 'project' as const, summary: `${assistantName} could not summarize this mail. Open it to read it.`, suggestedAction: 'Read it yourself' }
         })
-      const category = kind === 'owner' || kind === 'intake' ? 'owner' : result.category
+      // Personal addresses: everything is for the owner, except what the reader calls noise
+      // (marketing, bounces, receipts); that goes to Low priority and the digest like anywhere else.
+      const category = kind === 'intake' || (kind === 'owner' && result.category !== 'noise') ? 'owner' : result.category
       await audit('classified', row.id, { category, model: result.category, kind })
       let conversationId: string | null = null
       if (category !== 'noise') {
@@ -241,17 +259,53 @@ export const createInboundService = (deps: InboundDeps) => {
     }
   }
 
+  // `detail` says who closed it when it was not the owner in the app. Already done: nothing changes
+  // and no second audit line.
+  const markDone = async (id: string, detail: Record<string, unknown> = {}): Promise<IncomingMail> => {
+    const current = await requireInbound(id)
+    if (current.status === 'done') return inboundWire(current, await repo.draftsFor(id))
+    const row = await repo.updateInbound(id, { status: 'done', updatedAt: now() })
+    if (!row) throw new InboundError(404, 'Mail not found')
+    await audit('inbound_done', id, detail)
+    changed(row)
+    return inboundWire(row, await repo.draftsFor(id))
+  }
+
+  // The owner's reply to a mail went out (or they marked the draft sent): the mail is done.
+  const replied = async (inboundId: string, draftId: string): Promise<void> => {
+    if (!await repo.getInbound(inboundId)) return
+    await markDone(inboundId, { by: 'reply', draftId })
+  }
+
+  const agentFor = async (scope: AgentScope): Promise<string> => {
+    if (!scope.agent && !scope.conversation) throw new InboundError(400, 'An agent or conversation is required')
+    const conversation = scope.conversation ? await deps.conversation(scope.conversation) : undefined
+    if (scope.conversation && !conversation) throw new InboundError(404, 'Conversation not found')
+    if (scope.agent && conversation && scope.agent !== conversation.agentId) throw new InboundError(400, 'Agent does not own this conversation')
+    const agentId = conversation?.agentId ?? scope.agent
+    if (!agentId) throw new InboundError(400, 'An agent or conversation is required')
+    return agentId
+  }
+  const authorized = async (scope: AgentScope, action: MailAuthorization['action']): Promise<string> => {
+    const ctx: MailAuthorization = { agentId: await agentFor(scope), action, allowed: true }
+    await deps.authorize(ctx)
+    if (!ctx.allowed) throw new InboundError(403, 'Mail is turned off for this agent')
+    return ctx.agentId
+  }
+  const wire = (rows: InboundRow[]): Promise<IncomingMail[]> => Promise.all(rows.map(async row => inboundWire(row, await repo.draftsFor(row.id))))
+
   return {
-    syncAddresses, processThread, catchUp, maybeDigest, draftReply, redraft,
-    list: async (done: boolean): Promise<IncomingMail[]> =>
-      Promise.all((await repo.listInbound({ done })).map(async row => inboundWire(row, await repo.draftsFor(row.id)))),
+    syncAddresses, processThread, catchUp, maybeDigest, draftReply, redraft, markDone, replied,
+    list: async (view: InboundView): Promise<IncomingMail[]> => wire(await repo.listInbound({ view })),
     get: async (id: string): Promise<IncomingMail> => inboundWire(await requireInbound(id), await repo.draftsFor(id)),
-    markDone: async (id: string): Promise<IncomingMail> => {
-      const row = await repo.updateInbound((await requireInbound(id)).id, { status: 'done', updatedAt: now() })
-      if (!row) throw new InboundError(404, 'Mail not found')
-      await audit('inbound_done', id)
-      changed(row)
-      return inboundWire(row, await repo.draftsFor(id))
+    // Agents (internal token) read the inbox and close mail, audited as theirs. Nothing else.
+    agentList: async (scope: AgentScope, opts: { view: InboundView, from?: string }): Promise<IncomingMail[]> => {
+      await authorized(scope, 'readInbox')
+      return wire(await repo.listInbound(opts))
+    },
+    agentMarkDone: async (id: string, scope: AgentScope): Promise<IncomingMail> => {
+      const agentId = await authorized(scope, 'doneInbound')
+      return markDone(id, { by: 'agent', agentId })
     },
     addresses: async (): Promise<MailAddress[]> => (await repo.listAddresses()).map(addressWire),
     patchAddress: async (id: string, values: { kind?: AddressKind, agentId?: string | null }): Promise<MailAddress> => {
@@ -259,6 +313,28 @@ export const createInboundService = (deps: InboundDeps) => {
       if (!row) throw new InboundError(404, 'Address not found')
       await audit('address_changed', id, values)
       return addressWire(row)
+    },
+    // The home screen: mail the owner has not answered or finished as "needs you" (count goes on the
+    // Mail badge), and one slip into the inbox that is always there.
+    home: async (): Promise<{ count: number, needs: MailNeed[], slip: MailSlip }> => {
+      const inbox = await wire(await repo.listInbound({ view: 'inbox' }))
+      const waiting = inbox.filter(mail => mail.status === 'handled' && !mail.drafts.length)
+      const noise = (await repo.listInbound({ view: 'noise' })).length
+      const latest = inbox[0]
+      return {
+        count: waiting.length,
+        needs: waiting.slice(0, 5).map(mail => ({
+          id: `inbound:${mail.id}`, tone: 'mail', icon: 'i-lucide-inbox',
+          title: `${mail.category === 'owner' ? 'Mail for you' : 'New mail'} from ${mail.fromName || mail.fromAddress}`,
+          detail: mail.subject, action: { label: 'Open', to: links.inbound(mail.id) },
+        })),
+        slip: {
+          tone: 'mail', icon: 'i-lucide-inbox', label: 'Mail', to: links.inbox,
+          title: inbox.length ? `${inbox.length} in your inbox` : 'Inbox clear',
+          meta: latest ? `Latest from ${latest.fromName || latest.fromAddress}` : 'Nothing waiting for you',
+          badges: noise ? [{ label: `${noise} low priority`, tone: 'neutral' }] : [],
+        },
+      }
     },
   }
 }

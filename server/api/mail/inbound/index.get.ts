@@ -4,5 +4,5 @@ import { inboundQuerySchema } from '../../../../shared/types'
 
 export default mailHandler('owner', async event => {
   const query = await getValidatedQuery(event, inboundQuerySchema.parse)
-  return (await useMailInbound()?.list(Boolean(query.done))) ?? []
+  return (await useMailInbound()?.list(query.view)) ?? []
 })
