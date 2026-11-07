@@ -1,0 +1,68 @@
+/*
+ * Agent mail design tokens. Import after tailwindcss and @nuxt/ui in the host's main.css:
+ *
+ *   @import "tailwindcss";
+ *   @import "@nuxt/ui";
+ *   @import "@icety/agent-mail/css";
+ *   @source "../../node_modules/@icety/agent-mail";   (path from this css file)
+ *
+ * Every value falls back to Nuxt UI's own variables, so the screens look right in any Nuxt UI 4
+ * app. A host with its own design system sets the --mail-* variables (see README, Theming).
+ */
+
+@theme inline {
+  --color-mail-ink: var(--mail-ink, var(--ui-text-highlighted));
+  --color-mail-ink-2: var(--mail-ink-2, var(--ui-text));
+  --color-mail-ink-3: var(--mail-ink-3, var(--ui-text-muted));
+  --color-mail-ink-4: var(--mail-ink-4, var(--ui-text-dimmed));
+  --color-mail-ground: var(--mail-ground, var(--ui-bg-muted));
+  --color-mail-card: var(--mail-card, var(--ui-bg));
+  --color-mail-inset: var(--mail-inset, var(--ui-bg-elevated));
+  --color-mail-raised: var(--mail-raised, var(--ui-bg-accented));
+  --color-mail-line: var(--mail-line, var(--ui-border));
+  --color-mail-line-strong: var(--mail-line-strong, var(--ui-border-accented));
+  --color-mail-action: var(--mail-action, var(--ui-bg-inverted));
+  --color-mail-on-action: var(--mail-on-action, var(--ui-bg));
+  --color-mail-on-fill: var(--mail-on-fill, #fff);
+
+  /* Tones: ok (delivered, default sender), accent (mail itself), warn (replies, unknown delivery), err. */
+  --color-mail-ok-fill: var(--mail-ok-fill, var(--ui-success));
+  --color-mail-ok-tint: var(--mail-ok-tint, color-mix(in oklab, var(--ui-success) 14%, var(--ui-bg)));
+  --color-mail-ok-deep: var(--mail-ok-deep, color-mix(in oklab, var(--ui-success) 70%, var(--ui-text-highlighted)));
+  --color-mail-accent-fill: var(--mail-accent-fill, var(--ui-primary));
+  --color-mail-accent-tint: var(--mail-accent-tint, color-mix(in oklab, var(--ui-primary) 14%, var(--ui-bg)));
+  --color-mail-accent-deep: var(--mail-accent-deep, color-mix(in oklab, var(--ui-primary) 70%, var(--ui-text-highlighted)));
+  --color-mail-warn-fill: var(--mail-warn-fill, var(--ui-warning));
+  --color-mail-warn-tint: var(--mail-warn-tint, color-mix(in oklab, var(--ui-warning) 16%, var(--ui-bg)));
+  --color-mail-warn-deep: var(--mail-warn-deep, color-mix(in oklab, var(--ui-warning) 60%, var(--ui-text-highlighted)));
+  --color-mail-err-fill: var(--mail-err-fill, var(--ui-error));
+  --color-mail-err-tint: var(--mail-err-tint, color-mix(in oklab, var(--ui-error) 14%, var(--ui-bg)));
+  --color-mail-err-deep: var(--mail-err-deep, color-mix(in oklab, var(--ui-error) 70%, var(--ui-text-highlighted)));
+
+  --radius-mail-badge: var(--mail-radius-badge, 8px);
+  --radius-mail-tile-sm: var(--mail-radius-tile-sm, 9px);
+  --radius-mail-control: var(--mail-radius-control, 12px);
+  --radius-mail-tile: var(--mail-radius-tile, 13px);
+  --radius-mail-tile-lg: var(--mail-radius-tile-lg, 16px);
+  --radius-mail-panel: var(--mail-radius-panel, 18px);
+  --radius-mail-card: var(--mail-radius-card, 20px);
+  --radius-mail-sheet: var(--mail-radius-sheet, 28px);
+
+  --shadow-mail-ring: var(--mail-shadow-ring, 0 0 0 1px var(--ui-border));
+  --shadow-mail-lift: var(--mail-shadow-lift, 0 0 0 1px var(--ui-border), 0 1px 2px rgb(0 0 0 / 0.05), 0 6px 18px rgb(0 0 0 / 0.05));
+  --shadow-mail-lift-hi: var(--mail-shadow-lift-hi, 0 0 0 1px var(--ui-border), 0 2px 4px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.1));
+  --shadow-mail-sheet: var(--mail-shadow-sheet, 0 -8px 40px rgb(0 0 0 / 0.12));
+}
+
+@utility font-mail-display {
+  font-family: var(--mail-font-display, inherit);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.04;
+  font-variation-settings: var(--mail-font-display-variation, normal);
+}
+
+/* Planned, not yet done: diagonal stripes in --stripe (defaults to the current text colour). */
+@utility mail-stripes {
+  background-image: repeating-linear-gradient(135deg, var(--stripe, currentColor) 0 2px, transparent 2px 7px);
+}
