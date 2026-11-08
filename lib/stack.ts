@@ -13,6 +13,10 @@ export interface MailStackDeps {
   sendDelaySeconds: number
   // Used when OpenMail is not configured: log (simulated), SMTP or the host's own.
   transport: MailTransport
+  // The host's own transport, when it passed one. With OpenMail configured, drafts from an OpenMail
+  // address go through OpenMail and every other sender through this. Without it, OpenMail sends
+  // everything and a non-OpenMail sender fails.
+  hostTransport?: MailTransport
   openmail?: { client: OpenMailClient, reader: MailReader, ownerAddress: string, digestHour: number }
 }
 
@@ -27,7 +31,7 @@ export const createMailStack = (deps: MailStackDeps) => {
   const mail = createMailService({
     repo, owner: host.owner, links: host.links, now, sendDelaySeconds: deps.sendDelaySeconds,
     agentScope: host.agentScope, authorize: host.authorize ?? (() => {}),
-    transport: openmail ? createOpenMailTransport(openmail.client, async address => (await inboundRepo.addressByEmail(address))?.id) : deps.transport,
+    transport: openmail ? createOpenMailTransport(openmail.client, async address => (await inboundRepo.addressByEmail(address))?.id, deps.hostTransport) : deps.transport,
     conversation: host.conversation,
     agentExists: host.agentExists,
     noteExists: host.noteExists ?? (async () => false),

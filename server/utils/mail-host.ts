@@ -24,7 +24,8 @@ export interface MailServerHost extends MailHostPorts {
   requireOwner: (event: H3Event) => Promise<void>
   // Agent routes (/api/internal/mail/*): throw unless the request carries the internal token.
   requireAgent: (event: H3Event) => Promise<void>
-  // Replaces the configured transport (log or SMTP); OpenMail still wins when configured.
+  // Replaces the configured transport (log or SMTP). With OpenMail configured, drafts from an
+  // OpenMail address still go through OpenMail; every other sender goes through this one.
   transport?: MailTransport
   // The model the inbound reader runs. Default: the Claude Code CLI, tool-less (createClaudeRunner).
   runModel?: RunModel
@@ -68,6 +69,7 @@ const useMailStack = (): MailStack => {
   const created = createMailStack({
     host: h, store: h.store(), now: () => new Date(), sendDelaySeconds: Number(config.sendDelaySeconds),
     transport: h.transport ?? (config.smtpUrl ? createSmtpTransport(config.smtpUrl) : createLogTransport()),
+    hostTransport: h.transport,
     openmail,
   })
   if (config.imapUrl) imapPoll = createImapPoller(config.imapUrl, created.repo, created.mail, () => new Date())

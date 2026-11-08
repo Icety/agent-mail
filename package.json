@@ -1,6 +1,6 @@
 {
   "name": "@icety/agent-mail",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Mail for agent apps: agents draft, the owner reviews and sends with an undo window, replies and inbound mail come back into the chat. Nuxt layer plus plain TypeScript services, SQLite or Postgres.",
   "type": "module",
   "main": "./nuxt.config.ts",

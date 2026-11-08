@@ -26,7 +26,7 @@ Runtime: Bun (bun:sqlite, `Bun.spawn`, `HTMLRewriter`). Nuxt 4, Nuxt UI 4, Drizz
 ## Install
 
 ```bash
-bun add github:Icety/agent-mail#v0.1.0
+bun add github:Icety/agent-mail#v0.3.0
 ```
 
 Pin a tag. Update by moving the tag in `package.json` and running `bun install`.
@@ -100,7 +100,9 @@ export default defineNitroPlugin(nitroApp => defineMailHost(nitroApp, {
   publish: (topic, data) => {},                              // optional, live topics (see 5)
   authorize: ctx => { /* set ctx.allowed = false to turn mail off for ctx.agentId */ },  // optional
   agentScope: ctx => { /* add project agent ids to ctx.projectAgentIds (badge) */ },     // optional
-  transport: undefined,   // optional: your own MailTransport (e.g. Gmail API); default log or SMTP
+  transport: undefined,   // optional: your own MailTransport (e.g. Gmail API); default log or SMTP.
+                          // With OpenMail on, OpenMail addresses still send through OpenMail and
+                          // every other sender through this one (without it they fail)
   runModel: undefined,    // optional: the reader's model call; default `claude -p` tool-less
 }))
 ```

@@ -11,11 +11,16 @@ const uuidFrom = (key: string): string => {
 
 // Sends through the OpenMail inbox that owns the From address. Every recipient of the approved
 // snapshot is added to the pod's outbound allowlist first, so OpenMail itself refuses anything
-// that did not pass the owner's Send.
-export const createOpenMailTransport = (client: Pick<OpenMailClient, 'allowOutbound' | 'send'>, inboxFor: (address: string) => Promise<string | undefined>): MailTransport => ({
+// that did not pass the owner's Send. `other`: the host's own transport for senders that are not
+// OpenMail addresses (e.g. the owner's own mailbox); without it such a draft fails.
+export const createOpenMailTransport = (client: Pick<OpenMailClient, 'allowOutbound' | 'send'>, inboxFor: (address: string) => Promise<string | undefined>, other?: MailTransport): MailTransport => ({
   name: 'openmail',
   send: async mail => {
     const inboxId = await inboxFor(mail.from.toLowerCase())
+    if (!inboxId && other) {
+      const { idempotencyKey: _openMailOnly, ...rest } = mail
+      return other.send(rest)
+    }
     if (!inboxId) return { outcome: 'failed', error: `${mail.from} is not an OpenMail address. Pick a project address as sender` }
     const [to, ...extraTo] = mail.to
     if (!to || extraTo.length) return { outcome: 'failed', error: 'OpenMail sends to one To address. Move the others to Cc' }

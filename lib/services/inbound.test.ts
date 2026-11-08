@@ -3,7 +3,7 @@ import { createMailStack } from '../stack'
 import { createLogTransport } from './transports'
 import type { OpenMailClient, OpenMailMessage, OpenMailSend } from './openmail'
 import type { MailReader } from './reader'
-import type { MailAuthorization } from '../../shared/types'
+import type { MailAuthorization, MailTransport, OutgoingMail } from '../../shared/types'
 import { createFakeHost, storeAdapters } from '../test-support'
 
 const OWNER = 'owner@owner.example'
@@ -15,7 +15,7 @@ const message = (id: string, threadId: string, over: Partial<OpenMailMessage> = 
 })
 
 for (const adapter of storeAdapters) describe(adapter.name, () => {
-const setup = async (threads: Record<string, OpenMailMessage[]>, headers: Record<string, string> = {}, authorize: (ctx: MailAuthorization) => Promise<void> = async () => {}) => {
+const setup = async (threads: Record<string, OpenMailMessage[]>, headers: Record<string, string> = {}, authorize: (ctx: MailAuthorization) => Promise<void> = async () => {}, hostTransport?: MailTransport) => {
   // 07:00 in Amsterdam, an hour before the digest.
   let time = Date.parse('2026-10-19T05:00:00Z')
   const fake = createFakeHost([{ id: 'koopa', name: 'Koopa' }, { id: 'leo', name: 'Acme' }])
@@ -46,7 +46,7 @@ const setup = async (threads: Record<string, OpenMailMessage[]>, headers: Record
   const opened = await adapter.open()
   const stack = createMailStack({
     host: { ...fake.host, authorize }, store: opened.store, now: () => new Date(time), sendDelaySeconds: 10, transport: createLogTransport(),
-    openmail: { client, reader, ownerAddress: OWNER, digestHour: 8 },
+    openmail: { client, reader, ownerAddress: OWNER, digestHour: 8 }, hostTransport,
   })
   return { stack, inbound: stack.inbound!, read, sends, intakes, drafted, classified, advance: (ms: number) => { time += ms },
     auditLines: opened.auditLines, leoId: 'leo', leoConversation: () => fake.messages.find(m => m.conversationId === 'main:leo')?.conversationId ?? '',
@@ -157,6 +157,28 @@ test('a reply draft is revised server side, never by an agent session, and sent 
   expect(await f.inbound.list('inbox')).toEqual([])
   expect(await f.inbound.home()).toMatchObject({ count: 0, needs: [], slip: { title: 'Inbox clear', meta: 'Nothing waiting for you', badges: [] } })
   expect(await f.auditLines('inbound_done')).toEqual([{ ref: mail!.id, detail: { by: 'reply', draftId: draft.id } }])
+})
+
+test("with the host's own transport, OpenMail addresses send through OpenMail and every other sender through the host's", async () => {
+  const hostSends: OutgoingMail[] = []
+  const gmail: MailTransport = { name: 'gmail', send: async mail => { hostSends.push(mail); return { outcome: 'sent', messageId: '<host@example.test>' } } }
+  const f = await setup({ thr_1: [message('msg_1', 'thr_1')] }, {}, async () => {}, gmail)
+  await f.inbound.catchUp()
+  const [mail] = await f.inbound.list('inbox')
+  const viaOpenMail = await f.inbound.draftReply(mail!.id, 'Say yes')
+  await f.stack.mail.saveSender({ agentId: 'leo', address: 'sam@personal.example', name: 'Sam', isDefault: false })
+  const conversationId = viaOpenMail.conversationId
+  if (!conversationId) throw new Error('The reply draft has no conversation')
+  const viaHost = await f.stack.mail.createDraft({ conversationId, from: 'sam@personal.example', to: ['bob@example.test'], cc: [], subject: 'Hello', body: 'Hi Bob' })
+
+  await f.stack.mail.queue(viaOpenMail.id, viaOpenMail.revision)
+  await f.stack.mail.queue(viaHost.id, viaHost.revision)
+  f.advance(10_000)
+  await f.stack.mail.tick()
+
+  expect(f.sends).toEqual([{ inboxId: 'inb_hello', mail: expect.objectContaining({ to: 'jane@example.test', body: 'Reply: Say yes' }) }])
+  expect(hostSends).toEqual([expect.objectContaining({ from: 'sam@personal.example', to: ['bob@example.test'], body: 'Hi Bob' })])
+  expect((await f.stack.mail.listDrafts({}, true)).map(d => d.id).sort()).toEqual([viaOpenMail.id, viaHost.id].sort())
 })
 
 test('agents read the inbox views and close mail as themselves, audited; nothing else, and only when mail is on', async () => {
