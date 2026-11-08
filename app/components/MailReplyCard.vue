@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
 const unread = computed(() => !props.reply.readAt)
 const when = computed(() => mailWhen(props.reply.receivedAt))
 const place = computed(() => mailContextParts(props.contextLabel).place)
-const read = () => props.onRead ? props.onRead(props.reply.draftId) : navigateTo({ path: '/mail', query: { thread: props.reply.draftId } })
+const read = async (): Promise<void> => { await (props.onRead ? props.onRead(props.reply.draftId) : navigateTo({ path: '/mail', query: { thread: props.reply.draftId } })) }
 </script>
 
 <template>
