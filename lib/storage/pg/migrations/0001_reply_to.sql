@@ -1,0 +1,1 @@
+ALTER TABLE "mail_inbound" ADD COLUMN "reply_to" text;

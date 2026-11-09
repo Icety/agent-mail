@@ -70,6 +70,7 @@ const done = async () => {
           <span class="min-w-0 break-all text-sm text-mail-ink-3">to {{ mail.toAddress }}</span>
         </div>
         <p class="mt-3 break-words font-medium">{{ mail.fromName ? `${mail.fromName} <${mail.fromAddress}>` : mail.fromAddress }}</p>
+        <p v-if="mail.replyTo" class="mt-1 break-all text-sm text-mail-ink-3">Replies go to {{ mail.replyTo }}</p>
         <p v-if="mail.summary" class="mt-3 whitespace-pre-wrap break-words text-sm">{{ mail.summary }}</p>
         <p v-if="mail.suggestedAction && mail.category !== 'intake'" class="mt-2 text-sm text-mail-ink-3">Suggested: {{ mail.suggestedAction }}</p>
         <p v-if="mail.category === 'intake' && !mail.trusted" class="mt-2 text-sm text-mail-warn-deep">

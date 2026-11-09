@@ -181,6 +181,25 @@ test("with the host's own transport, OpenMail addresses send through OpenMail an
   expect((await f.stack.mail.listDrafts({}, true)).map(d => d.id).sort()).toEqual([viaOpenMail.id, viaHost.id].sort())
 })
 
+test('a contact form mail is answered at its Reply-To, not at the form sender', async () => {
+  const form = { fromAddr: 'noreply@form.test', addressNames: { 'noreply@form.test': 'Acme' } }
+  const f = await setup({
+    thr_1: [message('msg_1', 'thr_1', form)],
+    thr_2: [message('msg_2', 'thr_2', { ...form, createdAt: '2026-10-19T06:01:00.000Z' })],
+  }, {
+    msg_1: 'From: "Acme" <noreply@form.test>\nReply-To:\n "Visitor, Jr." <Visitor@Example.test>\nTo: <hello@acme.example>',
+    msg_2: 'From: "Acme" <noreply@form.test>\nReply-To: <noreply@form.test>\nTo: <hello@acme.example>',
+  })
+  await f.inbound.catchUp()
+  const [withReplyTo, sameAsFrom] = [...await f.inbound.list('inbox')].sort((a, b) => a.receivedAt.localeCompare(b.receivedAt))
+  expect(withReplyTo).toMatchObject({ fromAddress: 'noreply@form.test', replyTo: 'visitor@example.test' })
+  expect(sameAsFrom).toMatchObject({ replyTo: null })
+  expect(f.leoChat()[0]!.text).toContain('Reply to: visitor@example\\.test')
+
+  expect(await f.inbound.draftReply(withReplyTo!.id, 'Say yes')).toMatchObject({ to: ['visitor@example.test'] })
+  expect(await f.inbound.draftReply(sameAsFrom!.id, 'Say yes')).toMatchObject({ to: ['noreply@form.test'] })
+})
+
 test('agents read the inbox views and close mail as themselves, audited; nothing else, and only when mail is on', async () => {
   const f = await setup({
     thr_1: [message('msg_1', 'thr_1', { createdAt: '2026-10-19T06:00:00.000Z' })],

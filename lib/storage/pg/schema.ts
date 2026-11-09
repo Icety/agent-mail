@@ -93,6 +93,7 @@ export const inbound = pgTable('mail_inbound', {
   toAddress: text('to_address').notNull(),
   fromAddress: text('from_address').notNull(),
   fromName: text('from_name').notNull(),
+  replyTo: text('reply_to'),
   subject: text('subject').notNull(),
   body: text('body').notNull(),
   attachments: jsonb('attachments').$type<InboundAttachment[]>().notNull().default([]),

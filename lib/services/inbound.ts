@@ -52,6 +52,15 @@ const FORWARD_MARKER = /^[ \t>]*(?:-{2,}\s*(?:Forwarded message|Doorgestuurd ber
 
 const emailOf = (value: string): string => (value.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1] ?? value).trim().toLowerCase()
 const domainOf = (address: string): string => address.split('@')[1] ?? address
+
+// The first address in a Reply-To header ("Name, Jr." <a@b>, c@d), unfolded. Null when absent or
+// not an address.
+const replyToOf = (headers: string): string | null => {
+  const line = headers.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/).find(l => /^reply-to:/i.test(l))
+  const value = line?.replace(/^reply-to:/i, '').trim() ?? ''
+  const address = value.match(/<([^<>\s]+@[^<>\s]+)>/)?.[1] ?? value.match(/[^\s<>",;]+@[^\s<>",;]+/)?.[0]
+  return address ? address.toLowerCase() : null
+}
 const squash = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '')
 
 // Markdown in a chat message must not turn sender-controlled text into links or images.
@@ -116,11 +125,23 @@ export const createInboundService = (deps: InboundDeps) => {
     return repo.listAddresses()
   }
 
+  // Contact forms send as their own noreply@ with the visitor in Reply-To. OpenMail leaves replyTo
+  // empty, so the raw headers decide. Unreadable headers: replies go to the sender, as before.
+  const replyToFor = async (message: OpenMailMessage, fromAddress: string): Promise<string | null> => {
+    const headers = message.replyTo ? `Reply-To: ${message.replyTo}` : await deps.client.rawHeaders(message.id).catch(async (error: unknown) => {
+      await audit('reply_to_unknown', null, { openmailMessageId: message.id, error: error instanceof Error ? error.message.slice(0, 300) : 'unknown' })
+      return ''
+    })
+    const replyTo = replyToOf(headers)
+    return replyTo && replyTo !== fromAddress ? sanitizeLine(replyTo, 320) : null
+  }
+
   const store = async (message: OpenMailMessage, inboxId: string, address: AddressRow): Promise<InboundRow | undefined> => {
     const fromAddress = emailOf(message.fromAddr)
+    const replyTo = await replyToFor(message, fromAddress)
     const row = await repo.insertInbound({
       id: crypto.randomUUID(), openmailMessageId: message.id, threadId: message.threadId, addressId: inboxId,
-      toAddress: address.address, fromAddress, fromName: sanitizeLine(message.addressNames?.[fromAddress] ?? ''),
+      toAddress: address.address, fromAddress, fromName: sanitizeLine(message.addressNames?.[fromAddress] ?? ''), replyTo,
       subject: sanitizeLine(message.subject ?? '', 500) || '(no subject)',
       body: sanitizeMail({ html: message.bodyHtml, text: message.bodyText }),
       attachments: (message.attachments ?? []).map(a => ({ filename: sanitizeLine(a.filename, 200), contentType: a.contentType ?? '', sizeBytes: a.sizeBytes })),
@@ -132,11 +153,12 @@ export const createInboundService = (deps: InboundDeps) => {
   }
 
   const forModel = (row: InboundRow): MailForModel => ({ domain: domainOf(row.toAddress), address: row.toAddress, fromAddress: row.fromAddress,
-    fromName: row.fromName, subject: row.subject, attachments: row.attachments, body: row.body })
+    fromName: row.fromName, replyTo: row.replyTo, subject: row.subject, attachments: row.attachments, body: row.body })
 
   const notice = (row: InboundRow, heading: string, lines: string[]): string => [
     `**${heading}** · ${md(domainOf(row.toAddress))}`,
     `From: ${md(row.fromName ? `${row.fromName} <${row.fromAddress}>` : row.fromAddress)}`,
+    ...(row.replyTo ? [`Reply to: ${md(row.replyTo)}`] : []),
     `Subject: ${md(row.subject)}`,
     ...lines,
     `[Open mail](${links.inbound(row.id)})`,
@@ -236,8 +258,8 @@ export const createInboundService = (deps: InboundDeps) => {
     const senderName = address.displayName || address.address
     const reply = await deps.reader.draftReply({ mail: forModel(row), senderName, instruction })
       .catch(error => { throw new InboundError(502, `${assistantName} could not write the reply: ${error instanceof Error ? error.message.slice(0, 160) : 'error'}`) })
-    const conversationId = row.conversationId ?? (await deps.notify(address.agentId, `Drafting a reply to ${md(row.fromAddress)}: ${md(row.subject)}`)).conversationId
-    const draft = await deps.createReplyDraft({ conversationId, from: address.address, senderName, to: row.fromAddress,
+    const conversationId = row.conversationId ?? (await deps.notify(address.agentId, `Drafting a reply to ${md(row.replyTo ?? row.fromAddress)}: ${md(row.subject)}`)).conversationId
+    const draft = await deps.createReplyDraft({ conversationId, from: address.address, senderName, to: row.replyTo ?? row.fromAddress,
       subject: reply.subject, body: reply.body, inboundId: row.id, contextLabel: `Reply · ${domainOf(address.address)}` })
     await audit('draft_created', draft.id, { inboundId: row.id, instruction })
     changed(await repo.updateInbound(row.id, { conversationId, updatedAt: now() }) ?? row)

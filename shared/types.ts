@@ -239,6 +239,8 @@ export interface IncomingMail {
   toAddress: string
   fromAddress: string
   fromName: string
+  // Where a reply goes when it is not the sender (contact forms send as noreply@ with Reply-To).
+  replyTo: string | null
   subject: string
   body: string
   attachments: InboundAttachment[]

@@ -59,11 +59,11 @@ const discard = () => run('discard', () => actions.discard(d.value))
 const restore = () => run('restore', () => actions.restore(d.value))
 const undo = () => run('undo', () => actions.undo(d.value))
 const stop = () => run('stop', () => actions.stopRevise(d.value))
-const edit = () => editor.open(d.value)
+const edit = async (): Promise<void> => { await editor.open(d.value) }
 const revise = (note: string) => run('revise', async () => {
   if (await actions.revise(d.value, note)) revising.value = false
 })
-const openThread = () => props.onThread ? props.onThread(d.value.id) : navigateTo({ path: '/mail', query: { thread: d.value.id } })
+const openThread = async (): Promise<void> => { await (props.onThread ? props.onThread(d.value.id) : navigateTo({ path: '/mail', query: { thread: d.value.id } })) }
 
 const overflow = computed<DropdownMenuItem[]>(() => [
   ...(props.variant === 'review' ? [{ label: 'Ask agent to revise', icon: 'i-lucide-wand-sparkles', onSelect: () => { revising.value = true } }] : []),
