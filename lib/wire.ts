@@ -28,7 +28,7 @@ export const addressWire = (row: AddressRow): MailAddress => ({
 
 export const inboundWire = (row: InboundRow, linked: { id: string, state: IncomingMail['drafts'][number]['state'] }[] = []): IncomingMail => ({
   id: row.id, threadId: row.threadId, toAddress: row.toAddress, fromAddress: row.fromAddress, fromName: row.fromName,
-  subject: row.subject, body: row.body, attachments: row.attachments, receivedAt: row.receivedAt.toISOString(),
+  replyTo: row.replyTo, subject: row.subject, body: row.body, attachments: row.attachments, receivedAt: row.receivedAt.toISOString(),
   status: row.status, category: row.category, summary: row.summary, suggestedAction: row.suggestedAction,
   trusted: row.trusted, conversationId: row.conversationId, drafts: linked,
 })

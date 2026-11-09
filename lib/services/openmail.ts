@@ -22,6 +22,8 @@ export interface OpenMailMessage {
   bodyHtml: string | null
   // Display names from the sender's mail client, keyed by lower-cased address.
   addressNames?: Record<string, string> | null
+  // Usually null even when the mail has a Reply-To header; the raw headers are the source.
+  replyTo?: string | null
   attachments: OpenMailAttachment[]
   createdAt: string
 }

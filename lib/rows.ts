@@ -78,6 +78,8 @@ export interface InboundRow {
   toAddress: string
   fromAddress: string
   fromName: string
+  // The Reply-To address when it differs from the sender; replies go there.
+  replyTo: string | null
   subject: string
   body: string
   attachments: InboundAttachment[]

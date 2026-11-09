@@ -97,6 +97,7 @@ export const inbound = sqliteTable('mail_inbound', {
   toAddress: text('to_address').notNull(),
   fromAddress: text('from_address').notNull(),
   fromName: text('from_name').notNull(),
+  replyTo: text('reply_to'),
   subject: text('subject').notNull(),
   body: text('body').notNull(),
   attachments: text('attachments', { mode: 'json' }).$type<InboundAttachment[]>().notNull().default([]),
